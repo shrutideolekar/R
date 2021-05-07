@@ -1,0 +1,7 @@
+The research emphasizes to predict the solar power system coverage of a tile given the collection of predictor features. This research will help in prediction of the vitality of the solar system coverage (high or low) in different sectors (tiles) and might play a very useful role in solar systems installations to be carried out in those sectors.
+
+The entire analysis is carried out with the help of the statistical software - R. We will be using four different supervised classification methods to carry out the binary classification of the target variable “solar_system_count”. These are as below:
+1. Logistic Regression
+2. Ensemble Method - Bagging
+3. Random Forest Classifier
+4. Support Vector Machines
