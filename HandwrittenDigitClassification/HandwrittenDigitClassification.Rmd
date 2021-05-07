@@ -1,0 +1,301 @@
+---
+title: "Handwritten Digit Classification"
+author: "Shruti Deolekar"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data : Loading and Exploring the contents 
+
+The data provided for this assignment is data_usps_digits.RData which contains data recording handwritten digits from the United States Postal Service (USPS). It consists of grayscale (16x16) grid representations of image scans of the digits “0” through “9” (10 digits). Let us load this data first and check how it looks like.
+
+```{r}
+# Load all required libraries
+library(RColorBrewer)
+library(keras)
+library(tensorflow)
+
+# set seed for tensorflow as declaring a global seed with set.seed() would be 
+# ignored for our neural network model trained in keras
+tensorflow::tf$random$set_seed(19200705) #setting seed as my student number
+
+# color scale to display digits
+colors <- c("white", "black")
+custom_cols <- colorRampPalette(colors = colors)
+
+# load data and display structure
+data_digit <- load("data_usps_digits.RData")
+str(data_digit) 
+# after above results, we get that data already has x_train, y_train, x_test and y_test columns suitable for training and testing
+
+# Check if there are any NA's present
+sum(is.na(x_train))
+sum(is.na(x_test))
+
+y_train <- as.factor(y_train)  # Make y_train categorical
+levels(y_train) # displays categories/levels
+
+par(mfrow = c(4, 3), pty = "s", mar = c(1, 1, 1, 1), xaxt = "n", yaxt = "n")
+digits <- array(dim = c(10, 16 * 16))
+# display 0 to 9 digits in data
+for (digit in 0:9) {
+    digits[digit + 1, ] <- apply(x_train[y_train == digit, ], 2, sum)
+    digits[digit + 1, ] <- digits[digit + 1, ]/max(digits[digit + 1, ]) * 255
+    z <- array(digits[digit + 1, ], dim = c(16, 16))
+    z <- z[, 16:1]
+    image(1:16, 1:16, z, main = digit, col = custom_cols(256))
+}
+
+```
+
+## Data: Preprocessing
+
+Initially a multilayer neural network will be trained on our data with 2 hidden layers. Before that, it is important to pre process the data to make it appropriate for trainig the model. Primarily x_train and x_test will be range normalised to bring the values between 0-1 as initially the range is from -1 to 1. 
+
+```{r}
+data_digit <- load("data_usps_digits.RData")
+
+#set.seed(19200705)
+
+# function for range normalisation
+range_norm <-function(x, a = 0, b = 1) {
+  ((x - min(x)) / (max(x) - min(x))) * (b - a) + a
+}
+
+range(x_train)
+x_train = apply(x_train, 2, range_norm)
+range(x_train)
+x_test = apply(x_test, 2, range_norm)
+```
+
+Next, y_train and y_test will be encoded with "one-hot encoding". Here y_train which contains numerical categorical data is split into multiple columns depending on the number of categories present (here 10, as the categories are 0-9). Each column contains “0” or “1” corresponding to which column it has been placed.Refere below output of 6 observartions.
+
+```{r}
+# Perform one - hot encoding on y_train and y_test
+y_train=to_categorical(y_train,10)
+y_test=to_categorical(y_test,10)
+head(y_train)
+```
+
+## Multilayer neural network with 2 hidden layers
+
+### Building the neural network:
+Now when the data is ready for training the model, let us create a neural network model with 2 hidden layers which will consist **units (or nodes) as 256 and 128** respectively. We are using a sequential keras model and hence we need to specify the **input shape** i.e number of columns in x_train so that Keras can create the appropriate matrices. For the two hidden layers the **"ReLU"** activation function is used which is Rectified Linear Unit and is widely used for it's tendency to accelerate the convergence of stochastic gradient descent compared to the sigmoid / tanh functions. The last layer consists of connections for our **10 classes (0-9)** and the **"softmax"** activation function which takes a vector of K real numbers as input, and normalizes it into a probability distribution consisting of K probabilities proportional to the exponentials of the input numbers and is considered as standard for multi-class targets.
+
+```{r}
+N = ncol(x_train) # number of columns in training data x_train is the input shape
+
+model <- keras_model_sequential()
+model %>% layer_dense(units = 256, activation = "relu", input_shape = N) %>%
+  layer_dense(units = 128,activation ="relu") %>%
+  layer_dense(units = ncol(y_train), activation = "softmax")
+```
+
+### Compiling the NN model:
+
+The learning process is configured using .compile() function. A loss function needs to be specified which calculates the error rate and to fill this purpose **categorical_crossentropy** loss is used in our model. Futher, an optimizer needs to be specified which is responsible for reducing the loss by attributes such as weights and learning rate. Here, the **Stochastic Gradient Descent optimizer** - optimizer_sgd() is used with default settings. We can choose the metrics which will be evaluated during training and testing and here we have specified the **accuracy** metric.
+
+```{r}
+model %>% compile(loss = "categorical_crossentropy",
+                  optimizer = optimizer_sgd(), 
+                  metrics = "accuracy")
+```
+
+### Training the NN model:
+
+Once the model is complied, we can start with our training process. We need to set the epochs which specifies how many times we want to iterate on the whole training set (set to 100 here). 
+
+```{r}
+fit <- model %>% fit(x = x_train, y = y_train, 
+                     validation_data = list(x_test, y_test),
+                     epochs = 100, verbose = 1)
+```
+
+### Evaluating the performance of the model:
+
+Below is a plot which graphs the learning curve of our model. The improvement in accuracy i.e. the fall of error rate can be seen with successive epochs.
+
+```{r}
+# function to draw a smooth line along the curve
+smooth_line <- function(y) {
+  x <- 1:length(y)
+  out <- predict(loess(y ~ x))
+  return(out)
+}
+
+# define colors used for representation in the training results plot
+cols <- c("black","red", "gray50", "pink")
+
+# check performance (error)
+out <- 1 - cbind(fit$metrics$accuracy, fit$metrics$val_accuracy)
+matplot(out, pch = 19, ylab = "Error", xlab = "Epochs", 
+        col = adjustcolor(cols[1:2], 0.3), log = "y") # on log scale for better visualisation
+matlines(apply(out, 2, smooth_line), lty = 1, 
+          col = cols[1:2], lwd = 2)
+legend("topright", legend = c("Training","Test"), fill = cols[1:2], bty = "n")
+```
+
+To learn about the same numerically, let's see how well our model performs on the validation set which is given by :
+```{r}
+tail(fit$metrics$val_accuracy,1) #print accuracy
+```
+The accuracy achieved is around **93.67%** which is pretty good. Let us now observe what happens when an additional layer is added to the above neural network model.
+
+## Multilayer neural network with 3 hidden layers
+
+### Adding a hidden layer to the existing NN model:
+
+An additional layer can be appended to our model simply by the **pipe "%>%"** operator. We have specified 64 units in the third hidden layer with ReLU activation. Rest all the process remains unchanged.
+```{r}
+model_3l <- keras_model_sequential() #initialize a sequential keras model
+
+#Build the neural network
+model_3l %>% layer_dense(units = 256, activation = "relu", input_shape = N) %>%
+  layer_dense(units = 128,activation ="relu") %>%
+  layer_dense(units = 64,activation ="relu") %>%
+  layer_dense(units = ncol(y_train), activation = "softmax")
+
+#compile the neural network
+model_3l %>% compile(loss = "categorical_crossentropy",
+                  optimizer = optimizer_sgd(), 
+                  metrics = "accuracy")
+
+#Train the neural network
+fit_3l <- model_3l %>% fit(x = x_train, y = y_train, 
+                     validation_data = list(x_test, y_test),
+                     epochs = 100, verbose = 1)
+```
+
+
+### Evaluating performance of model with additional layer (3 hidden layers):
+
+Below is a plot which graphs the learning curve of our NN model with 3 hidden layers. The improvement in accuracy i.e. the fall of error rate can be seen with successive epochs.
+
+```{r}
+# # check performance (error)
+out_3l <- 1 - cbind(fit_3l$metrics$accuracy, fit_3l$metrics$val_accuracy)
+matplot(out_3l, pch = 19, ylab = "Error", xlab = "Epochs", 
+        col = adjustcolor(cols[1:2], 0.3), log = "y") # on log scale for better visualisation
+matlines(apply(out_3l, 2, smooth_line), lty = 1, 
+          col = cols[1:2], lwd = 2)
+legend("topright", legend = c("Training","Test"), fill = cols[1:2], bty = "n")
+
+tail(fit_3l$metrics$val_accuracy,1)
+```
+From the above graph and theoritical results, we can say that after adding one hidden layer to the model, the predictive performance has increased a little from **93.67% to 93.92%**. This is because the hidden layers perform complex computations on the weighted inputs which optimize the performance of our model and produce net outputs which are fed to the activation function. However, we can think of a scope to increase the performance of the model in case of overfitting by applying regularisation.
+
+# Regularisation
+
+Regularisation is applied to a model when it is intended to reduce the error on the test set at an expense of increased training error. There are multiple methods by which we can achieve regularisation. Let us look at one of the methods known as "Early Stopping" below:
+
+## Multilayer neural network with 3 hidden layers - Early Stopping
+
+In few neural networks, it may be a case that if the training is done for a long amount of time rather than increasing the generalization capability of the model, it increases the overfitting.In such cases **early stopping** takes effect which stops the training process as soon as no progress is observed on the validation set. Typically, a parameter **patience** is defined which sets the number of epochs to wait before early stop if no decrease in observed on the validation error.
+
+```{r}
+# initialize a sequential keras model
+model_es <- keras_model_sequential()
+
+# build the neural network
+model_es %>% layer_dense(units = 256, activation = "relu", input_shape = N) %>%
+  layer_dense(units = 128,activation ="relu") %>%
+  layer_dense(units = 64,activation ="relu") %>%
+  layer_dense(units = ncol(y_train), activation = "softmax")
+
+# Compile the model
+model_es %>% compile(loss = "categorical_crossentropy",
+                  optimizer = optimizer_sgd(), 
+                  metrics = "accuracy")
+
+# train the model
+fit_es <- model_es %>% 
+  fit(x = x_train, y = y_train, 
+      validation_data = list(x_test, y_test),
+      epochs = 100, verbose = 1,
+      callbacks =list(callback_early_stopping(monitor ="val_accuracy",patience =10))
+      )
+```
+
+### Plot training results of early stopping
+
+```{r}
+# check performance (error)
+out_es <- 1 - cbind(fit_es$metrics$accuracy, fit_es$metrics$val_accuracy)
+matplot(out_es, pch = 19, ylab = "Error", xlab = "Epochs", main = "Early Stopping",
+        col = adjustcolor(cols[1:2], 0.3), log = "y") # on log scale for better visualisation
+matlines(apply(out_es, 2, smooth_line), lty = 1, 
+          col = cols[1:2], lwd = 2)
+legend("topright", legend = c("Training","Test"), fill = cols[1:2], bty = "n")
+```
+
+### Check accuracy after applying early stopping regularisation to our existing model:
+
+```{r}
+tail(fit_es$metrics$val_accuracy,1) # accuracy
+```
+As per the results above, we can observe a **minimal degradation** in the performance of our model from **93.92% to 93.52%** i.e. using early stopping regularisation on our model is showing an adverse effect on the predictive performance of our model. One exquisite advantage of this type of regularisation is that the training is done **faster** as the process is stopped in succifient number of epochs (can be seen in the plot that 100 epochs are not completed). But it may happen that at times the training gets stopped earlier than it's supposed to be (Like in our case, it is possible that the performance might improve with more number of epochs). This may hinder the performance of the model by not allowing it to train to a point where it can show up the most of it's capabilities. To avoid this, we can increase the value of the "patience" parameter; but again that's not definite as even after numerous tweaking of the patience parameter it was difficult to achieve better performance. I thought of changing other parameters, but let's just stick to tweaking regularisation parameters so that we can get a clearer vision on the concept of regularisation. 
+So further, I have come up with another approach of regularisation known as **Drop Out** which gives the optimal predictive performance for our model.
+
+## Multilayer neural network with 3 hidden layers - Drop Out
+
+Drop out acts directly on the layout of the neural network and not on parameters like weight decay as discussed earlier. An argument **rate** is set which specifies the fraction of input units to the layer to be dropped. In this case, setting appropriate value for the rate parameter can be a challenging aspect and it got me repetitive tweaking of this hyperparameter to reach an agreeable value. I did not prefer to add any callbacks here to demonstrate 100% capability of drop out regularisation.
+
+```{r}
+# initialize sequential keras model
+model_do <- keras_model_sequential()
+
+# build the NN model
+model_do %>% layer_dense(units = 256, activation = "relu", input_shape = N) %>%
+  layer_dropout(rate = 0.3) %>%
+  layer_dense(units = 128,activation ="relu") %>%
+  layer_dropout(rate = 0.2) %>%
+  layer_dense(units = 64,activation ="relu") %>%
+  layer_dropout(rate = 0.2) %>%
+  layer_dense(units = ncol(y_train), activation = "softmax")
+
+# compile the NN model
+model_do %>% compile(loss = "categorical_crossentropy",
+                  optimizer = optimizer_sgd(), 
+                  metrics = "accuracy")
+
+# Train the model
+fit_do <- model_do %>% 
+  fit(x = x_train, y = y_train, 
+      validation_data = list(x_test, y_test),
+      epochs = 100, verbose = 1
+      )
+```
+
+
+### Evaluating performance with Drop Out and comparing the same with the NN model without regularisation:
+
+Below is the graph which shows comparative predictive performance of the two models viz multilayer neural network model with 3 hidden layers with and without regularisation.
+It is evident that test error goes on decreasing gradually with corresponding increase in the training error thus ultimately improving the generalisation performance of the model. 
+```{r}
+# compare the performance of the regularized model against the performance of the 
+# unregularized one with the help of accuracy metrics
+out_reg <- 1 - cbind(fit_3l$metrics$accuracy, fit_3l$metrics$val_accuracy,
+                     fit_do$metrics$accuracy, fit_do$metrics$val_accuracy)
+
+# Plot the comparison
+matplot(out_reg, pch = 19, ylab = "Error", xlab = "Epochs", 
+        col = adjustcolor(cols,0.3), log = "y")
+matlines(apply(out_reg, 2, smooth_line), lty = 1, col = cols,lwd = 2)
+legend("topright", legend = c("Training", "Test", "Train_reg", "Test_reg"),
+       fill = cols, bty = "n")
+```
+
+Let us have a look at some theoritical results now:
+
+```{r}
+apply(out_reg, 2, min)
+tail(fit_do$metrics$val_accuracy,1)
+```
+
+On observing above results, we can say that the test error of the regularised model is negligibly lower than the test error of the unregularised one. Similarly, a corresponding increase in the accuracy of the neural network model is observed and the final accuracy observed is **94.12%**. Thus, adding regularisation improves the generalisation performance of the model not much significantly, but marginally.
