@@ -1,0 +1,397 @@
+---
+title: "Prediction of Solar Power System Coverage"
+author: "Shruti Deolekar - 19200705"
+output:
+  word_document: default
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Abstract:
+
+The report consists 
+
+## Introduction:
+
+The major purpose of this project is to analyse the coverage of solar power systems with the given data set which is a subset of the **DeepSolar** database. This database is a solar installation database for the US, built by extracting information from satellite images. Photovoltaic panel installations are identified from over one billion image tiles covering all urban areas as well as locations in the US by means of an advanced machine learning framework. Each image tile records the amount of solar panel systems (in terms of panel surface and number of solar panels) and is complemented with features describing social, economic, environmental, geographical, and meteorological aspects. 
+
+Each row of the dataset is a “tile” of interest, that is an area corresponding to a detected solar power system, constituted by a set of solar panels on top of a building or at a single location such as a solar farm. The variable ‘solar_system_count’ is a binary variable indicating the coverage of solar power systems in a given tile. The variable takes outcome “low” if the tile has a low number of solar power systems (less than or equal to 10), while it takes outcome “high” if the tile has a large number of solar power systems (more than 10).
+
+The research emphasizes to **predict the solar power system coverage** of a tile given the collection of predictor features. This research will help in prediction of the vitality of the solar system coverage (high or low) in different sectors (tiles) and might play a very useful role in solar systems installations to be carried out in those sectors.
+
+## Methods:
+
+The entire analysis will be carried out with the help of the statistical software - R.
+We will be using four different supervised classification methods to carry out the binary classification of the target variable "solar_system_count". These are as below:
+
+1. Logistic Regression
+2. Ensemble Method - Bagging
+3. Random Forest Classifier
+4. Support Vector Machines
+
+The above methods will be elaborated in detail as we move forward with the classification
+
+### Load Libraries
+
+Below we are loading all the libraries which will be required in carrying out further analysis:
+
+```{r warning=FALSE}
+# load required libraries
+library(mlbench)
+library(nnet)
+library(randomForest)
+library(caret)
+library(dplyr)
+library(kernlab)
+library(MASS)
+library(adabag)
+library(SmartEDA)
+library(snow)
+library(doSNOW)
+library(foreach)
+```
+
+
+### Data : Loading and Preprocessing
+
+Let us load the given data which will be used for carrying out the binary classification.
+
+```{r}
+deepsolar <- read.csv("data_project_deepsolar.csv")
+```
+
+Before proceeding with any analysis it is very important that we study our data to check for undesirable inputs. These include **presence of NA or NULL values, presence of highly correlated variables** (highly influential variables) which can result in biased predictions and especially in case of classification problem it is vital to make sure that the data is **scaled**. Let us do some preprocessing and exploratory data analysis on our data.
+
+### Check for missing values:
+
+```{r}
+sum(is.na(deepsolar)) # Check for NA values
+sum(is.null(deepsolar)) # Check for NULL values
+```
+
+There are no NA or NULL values present in our dataset. Let us have a look at the structure of our data now and do a study of the categorical variable "solar_system_count".
+
+### Standardize / Scale numerical data for classification:
+
+```{r}
+# check variabilty in numerical variables
+ind <- sapply(deepsolar, is.numeric)
+deepsolar_cov <- cov(deepsolar[ind])
+plot(diag(deepsolar_cov), type = "b", ylab="variance")
+```
+
+As observed in the above plot, the variance of few variables is scattered and thus I would consider standardizing the data to a common scale with the help of scale() function before proceeding with the analysis.
+
+```{r}
+deepsolar[ind] <- lapply(deepsolar[ind], scale)
+deepsolar_cov <- cov(deepsolar[ind])
+plot(diag(deepsolar_cov), type = "b", ylab="variance")
+```
+
+The above plot after scaling looks fine. Let us have a look over the distribution of the target variable.
+
+### Check for class imbalance in the target variable:
+
+```{r}
+levels(deepsolar$solar_system_count)
+table(deepsolar$solar_system_count)
+round(prop.table(table(deepsolar$solar_system_count)),4)
+
+plot(deepsolar$solar_system_count,ylab="Solar system count votes",xlab="Distribution of votes",col=c("red", "blue"))
+```
+Our target variable is solar_system_count with two levels viz high and low. The proportion of these two levels is 52.57$ and 47.43% respectively which is also represented graphically in the plot. Thus we can say that there is **no evidence of class imbalance** for our target variable.
+
+### Feature Selection:
+
+Next, we'll have a look at our data set using the "SmartEDA" library and carry out variable reduction if required.
+
+```{r}
+ExpData(data = deepsolar, type = 1)
+```
+
+There are 20736 rows and 81 columns in our data set. Out of the 81 features, 77 are numeric and 4 are categorical in nature. As demonstrated above as well, there are no NAs or NULL values present in our data, thus, all 81 variables have complete cases (100%). However, since the number of features we will be dealing with are quite large (81), let us carry out feature selection. As we have only 3 categorical features apart from the target variable, we can think of removing them from the dataset as majority of the features are numerical and it is easier to deal with numerical data and generate meaningful predictions. So first, we will remove categorical data from our data set and consider only numerical features for the analysis.
+
+```{r}
+ind2 <- sapply(deepsolar, is.factor)
+which(ind2 == TRUE) # indices of categorical data
+deepsolar <- deepsolar[, -c(2, 76, 79) ] # remove categorical features except the target variable
+dim(deepsolar)
+```
+
+The predictor variables in our data have reduced to 77 after removing the categorical features. Next, we check if we have any highly correlated features in our dataset. Generally, it is considered to remove attributes with an absolute correlation of 0.75 or higher. 
+```{r}
+cor_matrix <- cor(deepsolar[, -1]) # calculate correlation matrix
+
+# Check proportion of highly correlated variables
+sum((cor_matrix > 0.75 | cor_matrix < -0.75) & cor_matrix < 1) / (77*77)
+cor_matrix[upper.tri(cor_matrix)] <- 0
+diag(cor_matrix) <- 0 
+
+# remove highly correlated variables
+cor_data <- deepsolar[ , apply(cor_matrix,2,function(x) all(abs(x) < 0.75))]
+
+# append target variable to the data
+solar_system_count <- deepsolar$solar_system_count
+deepsolar <- cbind(solar_system_count, cor_data)
+dim(deepsolar)
+
+names(deepsolar)
+```
+
+Around 1.9% of the 77 * 77 variable correlations are above 0.75 (positive as well as negative correlations). We remove the variables with abosulte correlation of 0.75 or higher as these variables may lead to a critical problem of **multicolinearity** which may impact the predictive performance of our models.
+
+### Implementation of Supervised Classification Methods:
+
+To date, we have learned a number of supervised classification models. Since, we have a binary classification task, I believe that Logistic Regression and Support Vector Machines are ideal choices. Among the ensemble methods, I am choosing bagging over boosting as bagging is based on bootstrapped samples of the data to increase variation and reduce theclassification error. Boosting, on the other hand tends to overfit the training data usually and may need additional regularisation to combat the same. Among the tree-based classification methods, I have chosen the Random Forest Classifier over classification/Decision trees. Random Forest Classifiers are essentially a collection of decision trees that use bagging and randomly select observations/rows and specific features/variables to build multiple decision trees and then averages the results. This enhances the performance of a classifier to a great extent, which is demonstrated in further analysis.
+
+
+### Splitting Data for Training Testing and Validation:
+
+Apart from splitting the data into train and test sets it is required to introduce a **validation set** as well as we have four competing classifiers which will be used as a surrogate to the test set and will be used to evaluate the individual performance of the classifiers. Testing the model on the test set gives us the genaralized accuracy whereas carrying out the same on a validation set gives a surrogate estimate of it. Futher, we can compare this accuracy of all the classifiers and make a decision to pick the best classifier which will then be used for calculating the generalized accuracy on the test set. Initially I'll be doing a 80%-20% split between the test and train data.
+The train set will be again split into 80%-20% in the replications of which a random sample of 20% of the training data will be used for validation.
+
+```{r}
+#dividing the data for training,validation, testing
+keep = sample(1:nrow(deepsolar), size = 0.75 * nrow(deepsolar))  
+test= setdiff(1:nrow(deepsolar), keep)
+dat = deepsolar[keep, ]       #training and validation data set
+dat_test = deepsolar[test, ]  #testing data set
+```
+
+Let us learn about the different methods used in detail:
+
+### 1. Multinomial (Logistic) Regression:
+
+We will train the model on the training data using the **multinom()** function from the **mlbench** considering target variable as "solar_system_count". It is important to note that the algorithm doesn't stop before reaching convergence and hence we should set the **maxit** parameter to an appropriate value. I have preferred not to set the maxit parameter which will let the model run completely and stop at convergence.
+
+```{r}
+# fit multinomial regression classifier on train data
+fit_log <- multinom(solar_system_count ~ ., data = dat)
+```
+### 2. Ensemble Method: Bagging
+
+Bagging is based on bootstrapped samples of the data to increase variation and reduce the classification error. Bagging aids a way to decrease the variance in the prediction by generating additional data for training from dataset using combinations with repetitions to produce multi-sets of the original data. We will train the model on the training data using the **bagging** function from the **adabag** package considering target variable as "solar_system_count".
+
+```{r}
+# fit bagging on train data
+fit_bag <- bagging(solar_system_count ~ ., data = dat) # Bagging
+```
+
+### 3. Support Vector Machines:
+
+SVM works by mapping data to a high-dimensional feature space so that data points can be classified, even when the data are not otherwise linearly separable. We will be using SVM in conjunction with kernels using the **ksvm** function from the **kernlab** package which provides an effective supervised classifier.
+
+```{r}
+# fit kernal SVM on train data
+fitSvm <- ksvm(solar_system_count ~ ., data = dat)
+```
+
+### 4. Random Forest Classifier:
+
+We will train the model on the training data using the **randomForest()** function considering target variables as "classes". An additional parameter **"importance"** is set to TRUE which can help us better assess the individual features used in the model and lead to better interpretation.
+
+```{r}
+# fit random forest classifier on train data
+fit_rf <- randomForest(solar_system_count ~ ., data = dat, importance = TRUE)
+```
+
+
+### Running above methods and doing a comparative study using hold out cross-validation:
+
+A hold-out cross validation is being used below to compare the predictive performance of the four classifiers. Here, chunks of data are used to evaluate the accuracy of individual classifiers. As mentioned earlier, the traindata will be further splitted into train and validation sets. The model is trained on the new splitted train data and resultant classifier is used to predict the classification on the validation data.  As the data is randomly split, we replicate the cross validation procedure 100 times to obtain a better estimate of the accuracy among the four classifiers. The best performing model will be then used to make predictions on the test data.
+The metrics achieved at every stage are stored in a variable named "out". We will use this variable for extracting results from the above process.
+
+### Parallelization of the code:
+
+I have introduced parallelization in the code using the **"SNOW" and "foreach"** library. I have made a cluster which runs on (n-1) cores where n is the number of available cores/processors on the machine. Hence this accelerates the completion of 100 reps which usually takes a lot of time without parallelisation. 
+
+
+```{r}
+# Enable parallel programming
+cores <- detectCores() - 1  #number of cores used to parallelize
+cluster <- makeCluster(cores, type="SOCK")   # create cluster
+registerDoSNOW(cluster) # register cluster
+# Export function used in the for each loop
+clusterExport(cluster, c("multinom","randomForest", "bagging", "ksvm", "errorevol", "glm"))
+
+N <- nrow(dat)
+
+# replicate the process a number of times
+R <- 100
+out <-matrix(NA, R, 6)
+colnames(out) <- c("val_log","val_bag","val_svm", "val_rf","best","test")
+
+results <- NULL
+results <- foreach (r = 1:R, .packages = c("caret", "kernlab")) %dopar% {
+  train <- sample(1:N, size = 0.75 * N)
+  val <- setdiff(1:N,train)
+  
+  # fit classifiers to only the training data
+  fit_log <- multinom(solar_system_count ~ ., data = dat[train, ], trace = FALSE) # logistic regression
+  fit_bag <- bagging(solar_system_count ~ ., data = dat[train, ]) # Bagging
+  fit_svm <- ksvm(solar_system_count ~ ., data = dat[train, ]) # svm
+  fit_rf <- randomForest(solar_system_count ~ ., data = dat[train, ], importance = TRUE)
+
+  # fit on validation data
+  ## logistic regression
+  predlog_val <- predict(fit_log, type = "class", newdata = dat[val,] )
+  tablog_val <- table(dat$solar_system_count[val], predlog_val)
+  log_acc <- sum(diag(tablog_val))/sum(tablog_val)
+  
+  ## bagging
+  predbag_val = predict(fit_bag, newdata= dat[val, ]) 
+  tabbag_val = predbag_val$confusion
+  bag_acc = sum(diag(tabbag_val))/sum(tabbag_val)
+  
+  ## support vector machines
+  predsvm_val <- predict(fit_svm, newdata = dat[val,])
+  tabsvm_val <- table(dat$solar_system_count[val], predsvm_val)
+  svm_acc <- sum(diag(tabsvm_val))/sum(tabsvm_val)
+  
+  ## random forest
+  predrf_val <- predict(fit_rf,type = "class", newdata = dat[val,])
+  tabrf_val <- table(dat$solar_system_count[val], predrf_val)
+  rf_acc <- sum(diag(tabrf_val)) / sum(tabrf_val)
+  
+  # compute accuracy
+  acc <- c(logistic = log_acc, bagging = bag_acc, svm = svm_acc, rf = rf_acc)
+  out[r,1] <- as.numeric(log_acc)
+  out[r,2] <- as.numeric(bag_acc)
+  out[r,3] <- as.numeric(svm_acc)
+  out[r,4] <- as.numeric(rf_acc)
+  
+  # use the method that did best on the validation data to predict the test data
+  best <-names(which.max(acc) )
+  switch(best,
+         logistic = {
+           predlog_test <- predict(fit_log, type ="class", newdata = dat_test)
+           tablog_test <- table(dat_test$solar_system_count, predlog_test)
+           best_acc <- sum(diag(tablog_test))/sum(tablog_test)
+         },
+         bagging = {
+           predbag_test = predict(fit_bag, newdata = dat_test) 
+           tabbag_test = predbag_test$confusion
+           best_acc = sum(diag(tabbag_test))/sum(tabbag_test)
+         },
+         svm = {
+           predsvm_test <- predict(fit_svm, newdata = dat_test)
+           tabsvm_test <- table(dat_test$solar_system_count, predsvm_test)
+           best_acc <- sum(diag(tabsvm_test))/sum(tabsvm_test)
+         },
+         rf = {
+           predrf_test <- predict(fit_rf,type ="class", newdata = dat_test)
+           tabrf_test <- table(dat_test$solar_system_count, predrf_test)
+           best_acc <- sum(diag(tabrf_test))/sum(tabrf_test)
+         }
+        )
+  out[r,5] <- best
+  out[r,6] <- as.numeric(best_acc)
+  
+  return(out)
+}
+```
+
+In the results variable, we get the metrics evaluated in the validation process. We will extract these results which will give us a dataframe of useful metrics to evaluate the performance of the four methods
+
+```{r}
+for (i in 1:R) {
+  out[i, ] <- results[[i]][i, ]
+}
+
+# Confirm that results are in an appropriate form to carry out analysis
+out <- as.data.frame(out)
+out[, 1] <- as.numeric(as.character(out[, 1]))
+out[, 2] <- as.numeric(as.character(out[, 2]))
+out[, 3] <- as.numeric(as.character(out[, 3]))
+out[, 4] <- as.numeric(as.character(out[, 4]))
+out[, 6] <- as.numeric(as.character(out[, 6]))
+
+head(out)
+```
+
+### Evaluation Metrics: Accuracy and standard deviation
+
+```{r}
+# average accuracies of all the four classifiers
+mean_accuracy <- t(colMeans(as.matrix(out[,c(1,2,3,4)])))
+mean_accuracy
+
+# estimated mean accuracy standard deviation
+sd_accuracy <- apply(out[,c(1,2,3,4)], 2, sd) / sqrt(R) 
+sd_accuracy
+```
+
+```{r}
+# Plot performance of both the models in one graph based on above metrics
+matplot(out[, c(1, 2, 3, 4)], type = "l", lty = c(2, 3, 4, 5), col = c("red", "blue", "green", "orange"),
+        xlab = "Replications", ylab = "Accuracy") 
+
+# Confidence intervals -> Upper and lower limit
+bounds1 <- rep(c(mean_accuracy[1] - 2*sd_accuracy[1], 
+                 mean_accuracy[1] + 2*sd_accuracy[1]), each = R)
+bounds2 <- rep(c(mean_accuracy[2] - 2*sd_accuracy[2], 
+                 mean_accuracy[2] + 2*sd_accuracy[2]), each = R)
+bounds3 <- rep(c(mean_accuracy[3] - 2*sd_accuracy[3], 
+                 mean_accuracy[3] + 2*sd_accuracy[3]), each = R)
+bounds4 <- rep(c(mean_accuracy[4] - 2*sd_accuracy[4], 
+                 mean_accuracy[4] + 2*sd_accuracy[4]), each = R)
+
+polygon(c(1:R, R:1), bounds1, col = adjustcolor("red", 0.2), border = FALSE)
+polygon(c(1:R, R:1), bounds2, col = adjustcolor("blue", 0.2), border = FALSE)
+polygon(c(1:R, R:1), bounds3, col = adjustcolor("green", 0.2), border = FALSE)
+polygon(c(1:R, R:1), bounds4, col = adjustcolor("orange", 0.2), border = FALSE)
+
+# Draw a line for estimated mean
+abline(h = mean_accuracy, col = c("red", "blue", "green", "orange"))
+
+legend("topright", fill = c("red","blue", "green", "orange"),
+       legend = c("Multinomial", "Bagging", "SVM", "RandomForest"), cex = 0.5)
+```
+
+### Compare top two model performance:
+
+```{r}
+# how many times each classifier was selected
+table(out[,5])/R
+
+# summary test accuracy of the selected classifiers
+tapply(out[,6], out[,5], summary)
+
+boxplot(out$test ~ out$best) 
+stripchart(out$test~out$best,add =TRUE,vertical =TRUE,pch =19,col =adjustcolor("blue",0.2))
+```
+
+### Predictive performance of the best model - Random Forest Classifier:
+
+We will perform testing on the testing data to verify till what extent the model produces expected results and find the generalisation accuracy to assess the overall performance of our model.
+
+```{r}
+# Model Testing
+pred <- predict(fit_rf, type = "class", newdata = dat_test)
+tab <- table(dat_test$solar_system_count, pred)
+tab
+accuracy <- sum(diag(tab))/sum(tab)
+accuracy
+```
+
+We obtain a **generalisation accuracy of ~90%** for our random forest classifier model which terms our model to be a good fit. 
+
+```{r}
+varImpPlot(fit_rf, type = 1, cex = 0.6)
+
+# Variable with the lowest decrease in Accuracy (Least relevant variable)
+min_imp <-c(which(data.frame(fit_rf$importance)$MeanDecreaseAccuracy ==
+                     min(data.frame(fit_rf$importance)$MeanDecreaseAccuracy)))
+min_imp
+
+
+# Variable with the highest decrease in Accuracy (Most relevant variable)
+max_imp <-c(which(data.frame(fit_rf$importance)$MeanDecreaseAccuracy ==
+                     max(data.frame(fit_rf$importance)$MeanDecreaseAccuracy)))
+max_imp
+```
