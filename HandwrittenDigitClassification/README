@@ -1,0 +1,2 @@
+Trained a multilayer neural network on handwritten digits pixel data and achieved optimum accuracy of 96.21% by applying regularisation.
+Technologies: Python, RStudio - Keras, Tensorflow
