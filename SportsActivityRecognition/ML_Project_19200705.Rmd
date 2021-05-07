@@ -1,0 +1,463 @@
+---
+title: "Daily and Sports Activities Recognition"
+author: "Shruti Deolekar - 19200705"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Abstract:
+
+The report consists 
+
+## Introduction:
+
+The major purpose of this project is to analyse daily and sports activities with the given movement sensor data. The data are motion sensor measurements of 19 daily and sports activities, each performed by 8 subjects (4 female, 4 male, between the ages 20 and 30) in their own style for 5 minutes. For each subject, five sensor units are used to record the movement on the torso, arms, and legs. Each unit is constituted by 9 sensors: x-y-z accelerometers, x-y-z gyroscopes, and x-y-z magnetometers.
+
+Sensor units are calibrated to acquire data at 25 Hz sampling frequency. The 5-minute signals are divided into 5-second signal segments, so that a total of 480 signal segments are obtained for each activity, thus 480 × 19 = 9120 signal segments classified into 19 classes. Each signal segment is divided into 125 sampling instants recorded using 5 × 9 = 45 sensors. Hence, each signal segment is represented as a 125 × 45 matrix, where columns contains the 125 samples of data acquired from one of the sensors of one of the units over a period of 5 seconds, and rows contain data acquired from all of the 45 sensors at a particular sampling instant. For each signal matrix: columns 1-9 correspond to the sensors in the torso unit, columns 10-18 correspond to the sensors in right arm unit, columns 19-27 correspond to the sensors in the left arm unit, columns 28-36 correspond to the sensors in the right leg unit, and columns 37-45 correspond to the sensors in the left leg unit. For each set of 9 sensors, the first three are accelerometers, the second three are gyroscopes and the last three magnetometers.
+
+The research emphasizes on **daily and sports activity recognition** based on the movements detected by the sensonrs. This research will help in prediction of the vitality of the solar system coverage (high or low) in different sectors (tiles) and might play a very useful role in solar systems installations to be carried out in those sectors.
+
+## Methods:
+
+The entire analysis will be carried out with the help of the statistical software - R.
+We will be using four different supervised classification methods to carry out the binary classification of the target variable "solar_system_count". These are as below:
+
+1. Logistic Regression
+2. Ensemble Method - Bagging
+3. Random Forest Classifier
+4. Support Vector Machines
+
+The above methods will be elaborated in detail as we move forward with the classification
+
+### Load Libraries
+
+Below we are loading all the libraries which will be required in carrying out further analysis:
+
+```{r warning=FALSE}
+# load required libraries
+library(nnet)
+library(keras)
+library(tensorflow)
+library("tfruns")
+library(data.table)
+library(mltools)
+library(yardstick)
+library(ggplot2)
+```
+
+
+### Data : Loading and Preprocessing
+
+Let us load the given data which will be used for carrying out the binary classification.
+
+```{r}
+data <- load("data_activity_recognition.RData")
+str(data)
+dim(x_train)
+length(y_train)
+length(y_test)
+```
+
+Before proceeding with any analysis it is very important that we study our data to check for undesirable inputs. These include **presence of NA or NULL values**. Let us do some preprocessing and exploratory data analysis on our data.
+
+### Check for missing values:
+
+```{r}
+sum(is.na(data)) # Check for NA values
+sum(is.null(data)) # Check for NULL values
+```
+
+There are no NA or NULL values present in our dataset. Let us have a look at the structure of our data now and do a study of the categorical variable "solar_system_count".
+
+### Preprocessing data
+
+```{r}
+# we transform the data from 3D to 2D
+x_train <-array_reshape(x_train,c(nrow(x_train),125*45))
+x_test <-array_reshape(x_test,c(nrow(x_test),125*45))
+
+dim(x_train)
+dim(x_test)
+
+# simple function for normalization in interval [a,b]
+range_norm <- function(x, a = 0, b = 1) 
+{
+  ((x - min(x))/(max(x) - min(x)))*(b - a)+a
+}
+
+range(x_train)
+x_train = apply(x_train, 2, range_norm)
+range(x_train)
+x_test = apply(x_test, 2, range_norm)
+```
+
+Next, y_train and y_test will be encoded with "one-hot encoding". Here y_train which contains numerical categorical data is split into multiple columns depending on the number of categories present (here 10, as the categories are 0-9). Each column contains “0” or “1” corresponding to which column it has been placed.Refere below output of 6 observartions.
+
+```{r}
+# Perform one - hot encoding on y_train and y_test
+sum(is.null(y_train))
+length(unique(y_test))
+head(y_train)
+
+y_train_raw <- y_train
+y_test_raw <- y_test
+y_fac <- as.factor(y_train)
+y_train <- one_hot(as.data.table(y_fac))
+yt_fac <- as.factor(y_test)
+y_test <- one_hot(as.data.table(yt_fac))
+
+y_test <- as.matrix(y_test)
+y_train <- as.matrix(y_train)
+
+head(y_train[,c(1:4)])
+dim(y_train)
+dim(y_test)
+```
+
+### PCA
+
+```{r}
+pca <- prcomp(x_train)# pca
+prop <- cumsum(pca$sdev^2) / sum(pca$sdev^2) # compute cumulative proportion of variance
+Q <- length(prop[prop < 0.99])
+Q # only a handful is retained
+
+#extract first Q principal components
+x_train <- pca$x[,1:Q]
+x_test <- predict(pca, x_test)[,1:Q]
+
+dim(x_train)
+dim(x_test)
+V = ncol(x_train)
+```
+
+### Fit multilayer neural network
+```{r}
+model <- keras_model_sequential() #initialize a sequential keras model
+
+#Build the neural network
+model %>% layer_dense(units = 1134, activation = "relu", input_shape = ncol(x_train)) %>%
+  layer_dense(units = 512,activation ="relu") %>%
+  layer_dense(units = 128,activation ="relu") %>%
+  layer_dense(units = ncol(y_train), activation = "softmax")
+
+#compile the neural network
+model %>% compile(loss = "categorical_crossentropy",
+                  optimizer = optimizer_sgd(), 
+                  metrics = "accuracy")
+
+#Train the neural network
+fit <- model %>% fit(x = x_train, y = y_train, 
+                     validation_data = list(x_test, y_test),
+                     epochs = 50, verbose = 1)
+
+# Validation accuracy achieved by above model
+tail(fit$metrics$val_accuracy,1)
+
+plot(fit)
+
+# Plot the accuracy of the training data 
+plot(fit$metrics$accuracy, main="Model Accuracy", xlab = "epoch", ylab="accuracy", col="blue", type="l")
+
+# Plot the accuracy of the validation data
+lines(fit$metrics$val_accuracy, col="green")
+
+# Add Legend
+legend("bottomright", c("train","val"), col=c("blue", "green"), lty=c(1,1))
+```
+### Evaluating the performance of the model:
+
+Below is a plot which graphs the learning curve of our model. The improvement in accuracy i.e. the fall of error rate can be seen with successive epochs.
+
+```{r}
+# function to draw a smooth line along the curve
+smooth_line <- function(y) {
+  x <- 1:length(y)
+  out <- predict(loess(y ~ x))
+  return(out)
+}
+
+# define colors used for representation in the training results plot
+cols <- c("black","red", "gray50", "pink")
+
+# check performance (error)
+out <- 1 - cbind(fit$metrics$accuracy, fit$metrics$val_accuracy)
+matplot(out, pch = 19, ylab = "Error", xlab = "Epochs", 
+        col = adjustcolor(cols[1:2], 0.3), log = "y") # on log scale for better visualisation
+matlines(apply(out, 2, smooth_line), lty = 1, 
+          col = cols[1:2], lwd = 2)
+legend("topright", legend = c("Training","Test"), fill = cols[1:2], bty = "n")
+```
+
+As seen in the above plot, it is observed that there is a huge gap in the training accurary and the testing accuracy lines. This conveys that our model overfits training data. To resolve this issue, let us introduce regularisation in our model. Also, we do not know if we have ideal number of nodes/neurons in the hidden layers. We will tweak some hyper parameters of the obove model and decide the optimal model.
+
+### MODEL TUNING
+
+## Split test data into validation set
+
+For validation purpose, the test data is further split into half of which one half will be used for model tuning and other half for actual testing and evaluation of the generalized predictive performance of our model.
+
+```{r}
+nrow(x_test)
+# there are 1520 rows in x_test, approximate half would be 760
+val <- sample(1:nrow(x_test), 760)
+test <- setdiff(1:nrow(x_test), val)
+x_val_tun <- x_test[val, ]
+y_val_tun <- y_test[val, ]
+x_test_tun <- x_test[test, ]
+y_test_tun <- y_test[test, ]
+
+# store number of rows and columns in the training set which will be used 
+# during model training
+N <-nrow(x_train)
+V <-ncol(x_train)
+
+```
+### Regularisation: Early Stopping, Tuning number of nodes in hidden layers
+
+```{r warning = FALSE, echo = T, results = "hide", message = FALSE}
+# grid of hyperparameters
+nodes1_set <- c(169, 290, 256)
+nodes2_set <- c(140, 74, 128)
+lr_set <- c(0.01, 0.02, 0.015)
+
+runs <- tuning_run("model_conf_neurons.R",
+                   runs_dir = "tuning_neurons",
+                   flags = list(
+                     nodes1 = nodes1_set,
+                     nodes2 = nodes2_set,
+                     lr = lr_set
+                   ),
+                   sample = 0.5)
+```
+
+
+### Extracting results obtained from model tuning process:
+
+```{r warning = FALSE}
+library(jsonlite)
+library(rjson)
+library(RJSONIO)
+
+read_metrics <- function(path, files = NULL)
+  # 'path' is where the runs are --> e.g. "path/to/runs"
+{
+  path <- paste0(path, "/")
+  if(is.null(files)) 
+    files <- list.files(path)
+  n <- length(files)
+  out <- vector("list", n)
+  for(i in 1:n) 
+  {
+    dir <- paste0(path, files[i], "/tfruns.d/")
+    out[[i]] <- jsonlite::fromJSON(paste0(dir, "metrics.json"))
+    out[[i]]$flags <- jsonlite::fromJSON(paste0(dir, "flags.json"))
+    out[[i]]$evaluation <- jsonlite::fromJSON(paste0(dir, "evaluation.json"))
+  }
+  return(out)
+}
+
+plot_learning_curve <- function(x, ylab = NULL,cols = NULL,top = 3,span = 0.4, ...)
+{
+  # to add a smooth line to points
+  smooth_line <- function(y)
+  {
+    x <- 1:length(y)
+    out <- predict(loess(y ~ x, span = span))
+    return(out)
+  }
+  matplot(x, ylab = ylab, xlab = "Epochs", type = "n", ...)
+  grid()
+  matplot(x, pch = 19, col = adjustcolor(cols, 0.3), add = TRUE)
+  tmp <- apply(x, 2, smooth_line)
+  tmp <- sapply(tmp, "length<-", max(lengths(tmp)))
+  set <- order(apply(tmp, 2, max, na.rm = TRUE), decreasing = TRUE)[1 : top]
+  cl <- rep(cols, ncol(tmp))
+  cl[set] <- "blue"
+  matlines(tmp, lty = 1, col = cl, lwd = 2) # draw line to highlight
+}
+```
+
+Below, we extract the learning scores and plot the validation accuracy learning curve. The learning curves obtained by the top three models are highlighted in blue. 
+```{r}
+# extract results
+out_neurons <- read_metrics("tuning_neurons")
+
+# extract validation accuracy and plot learning curve
+acc_neurons <- sapply(out_neurons,"[[","val_accuracy")
+plot_learning_curve(acc_neurons, col = adjustcolor("black", 0.3), 
+                    ylim = c(0.85,1), ylab = "Val accuracy", top = 3)
+```
+
+
+The function **ls_runs** is used below which lists the validation accuracies obtained by trianing all the models and testing them on the test data. A data frame of top five of these has been printed.
+
+```{r}
+res_es <- ls_runs(metric_val_accuracy > 0.90, runs_dir ="tuning_neurons",
+              order = metric_val_accuracy)
+res_es <- res_es[,c(2,4,8:10)]
+res_es[1:5, ] #display top 10 results
+neurons_1 <- res_es[1, ]$flag_nodes1
+neurons_2 <- res_es[1, ]$flag_nodes2
+lr_es <- res_es[1, ]$flag_lr
+neurons_1
+neurons_2
+```
+
+### Regularisation: Drop Out
+
+```{r warning = FALSE, echo = T, results = "hide", message = FALSE}
+# grid of hyperparameters
+dropout1_set <- c(0.0, 0.3, 0.4)
+dropout2_set <- c(0.0, 0.2, 0.4)
+dropout3_set <- c(0.0, 0.3, 0.4)
+lr_set <- c(0.01, 0.02, 0.015)
+
+runs <- tuning_run("model_conf_do.R",
+                   runs_dir = "tuning_drop",
+                   flags = list(
+                     dropout1 = dropout1_set,
+                     dropout2 = dropout2_set,
+                     dropout3 = dropout3_set,
+                     lr = lr_set
+                   ), 
+                   sample = 0.2)
+```
+
+Below, we extract the learning scores and plot the validation accuracy learning curve. The learning curves obtained by the top three models are highlighted in blue.
+
+```{r}
+# extract results
+out_do <- read_metrics("tuning_drop")
+
+# extract validation accuracy and plot learning curve
+acc_do <- sapply(out_do,"[[","val_accuracy")
+plot_learning_curve(acc_do, col = adjustcolor("black", 0.3), 
+                    ylim = c(0.85,1), ylab = "Val accuracy", top = 3)
+```
+
+The function **ls_runs** is used below which lists the validation accuracies obtained by trianing all the models and testing them on the test data. A data frame of top ten of these has been printed.
+
+```{r}
+res_do <- ls_runs(metric_val_accuracy > 0.90, runs_dir ="tuning_drop",
+              order = metric_val_accuracy)
+res_do <- res_do[,c(2,4,8:11)]
+res_do[1:5, ] #display top 10 results
+do1 <- res_do[1, ]$flag_dropout1
+do2 <- res_do[1, ]$flag_dropout2
+do3 <- res_do[1, ]$flag_dropout3
+lr_do <- res_do[1, ]$flag_lr
+```
+
+### Regularisation: L2
+
+```{r warning = FALSE, echo = T, results = "hide", message = FALSE}
+# grid of hyperparameters
+lambda_set <- c(0, exp(seq(-6,-4, length = 9)))
+lr_set <- c(0.01, 0.02, 0.015)
+
+runs <- tuning_run("model_conf_l2.R",
+                   runs_dir = "tuning_l2",
+                   flags = list(
+                     lambda = lambda_set,
+                     lr = lr_set
+                   ), 
+                   sample = 0.4)
+```
+Below, we extract the learning scores and plot the validation accuracy learning curve. The learning curves obtained by the top three models are highlighted in blue. 
+```{r}
+# extract results
+out_l2 <- read_metrics("tuning_l2")
+
+# extract validation accuracy and plot learning curve
+acc_l2 <- sapply(out_l2,"[[","val_accuracy")
+plot_learning_curve(acc_l2, col = adjustcolor("black", 0.3), 
+                    ylim = c(0.85,1), ylab = "Val accuracy", top = 3)
+```
+
+The function **ls_runs** is used below which lists the validation accuracies obtained by trianing all the models and testing them on the test data. A data frame of top five of these has been printed.
+
+```{r}
+res_l2 <- ls_runs(metric_val_accuracy > 0.90, runs_dir ="tuning_l2",
+              order = metric_val_accuracy)
+res_l2 <- res_l2[,c(2, 4, 8, 9)]
+
+lambda <- res_l2[1, ]$flag_lambda
+lr_l2 <- res_l2[1, ]$flag_lr
+
+res_l2[1:5, ] #display top 10 results
+```
+
+## Evaluate on best model - DO
+
+```{r}
+model <- keras_model_sequential() #initialize a sequential keras model
+
+#Build the neural network
+model %>% layer_dense(units = 1134, activation = "relu", input_shape = ncol(x_train)) %>%
+  layer_dropout(rate = do1) %>% 
+  layer_dense(units = neurons_1,activation ="relu") %>%
+  layer_dropout(rate = do2) %>% 
+  layer_dense(units = neurons_2,activation ="relu") %>%
+  layer_dropout(rate = do3) %>% 
+  layer_dense(units = ncol(y_train), activation = "softmax")
+
+#compile the neural network
+model %>% compile(loss = "categorical_crossentropy",
+                  optimizer = optimizer_sgd(lr = lr_do), 
+                  metrics = "accuracy")
+
+
+#Train the neural network
+fit <- model %>% fit(x = x_train, y = y_train, 
+                     validation_data = list(x_test, y_test),
+                     epochs = 100, verbose = 1, callbacks = callback_early_stopping
+                     (monitor = "val_accuracy", patience = 20))
+
+# Validation accuracy achieved by above model
+tail(fit$metrics$val_accuracy,1)
+
+plot(fit)
+
+# Plot the accuracy of the training data 
+plot(fit$metrics$accuracy, main="Model Accuracy", xlab = "epoch", ylab="accuracy", col="blue", type="l")
+
+# Plot the accuracy of the validation data
+lines(fit$metrics$val_accuracy, col="green")
+
+# Add Legend
+legend("bottomright", c("train","val"), col=c("blue", "green"), lty=c(1,1))
+```
+
+### Evaluating the performance of the model:
+
+```{r}
+classes <- model %>% predict_classes(x_test)
+
+# Confusion matrix
+cm <- table(y_test_raw, classes)
+cm
+confusion_matrix <- as.data.frame(cm)
+ggplot(data = confusion_matrix,
+       mapping = aes(x = classes,
+                     y = y_test_raw)) +
+  geom_tile(aes(fill = Freq)) +
+  geom_text(aes(label = sprintf("%1.0f", Freq))) +
+  scale_fill_gradient(low = "beige",
+                      high = "red")
+```
+
+Below is a plot which graphs the learning curve of our model. The improvement in accuracy i.e. the fall of error rate can be seen with successive epochs.
+
+```{r}
+# check performance (error)
+out <- 1 - cbind(fit$metrics$accuracy, fit$metrics$val_accuracy)
+matplot(out, pch = 19, ylab = "Error", xlab = "Epochs", 
+        col = adjustcolor(cols[1:2], 0.3), log = "y") # on log scale for better visualisation
+matlines(apply(out, 2, smooth_line), lty = 1, 
+          col = cols[1:2], lwd = 2)
+legend("topright", legend = c("Training","Test"), fill = cols[1:2], bty = "n")
+```
