@@ -1,0 +1,63 @@
+---
+title: "PA_Assignment"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+House = read.csv(file.choose())
+colnames(House)[colnames(House)=="ï..Price"] <- "Price"
+```
+
+## Exploratory Data Analysis
+
+**1. Using a boxplot, histogram and summary. Describe the distribution of 
+the sales price of the houses. **
+
+```{r}
+boxplot(House$Price)
+hist(House$Price)
+summary(House$Price)
+```
+
+**2. Convert all the categorical variables to factors. Using the summary and
+a boxplot describe how sales prices vary with respect to the number of
+bedrooms, bathrooms, garage size and school. **
+
+```{r}
+sapply(House, class)
+boxplot(House$Price~House$Bed)
+boxplot(House$Price~House$Bath)
+boxplot(House$Price~House$Garage)
+boxplot(House$Price~House$School)
+```
+
+**3. Using the summary, correlation and the pairs plots discuss the relationship between the response sales price and each of the numeric predictor variables. **
+
+```{r}
+sapply(House, class)
+pairs(House$Price~House$Size) #numeric
+pairs(House$Price~House$Bath) #numeric
+pairs(House$Price~House$Lot) #integer
+pairs(House$Price~House$Bed) #integer
+pairs(House$Price~House$Year) #integer
+pairs(House$Price~House$Garage) #integer
+x <- House$Price
+cor(x, House$Size)
+cor(x, House$Bath)
+cor(x, House$Lot)
+cor(x, House$Bed)
+cor(x, House$Year)
+cor(x, House$Garage)
+```
+
+## Regression Model
+
+**1. Fit a multiple linear regression model to the data with sales price as the response and size, lot, bath, bed, year, garage and school as the predictor variables. Write down the equation for this model. **
+
+```{r}
+
+```
